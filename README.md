@@ -1,7 +1,7 @@
 # Time Series Analysis of GDP and Imports  
 ### Central African Republic (1960–2017)
 
-## 📊 Project Overview
+## Project Overview
 This project analyzes the relationship between GDP and Imports (% of GDP) in the Central African Republic using time series methods.
 
 The dataset spans from 1960 to 2017 and focuses on understanding:
@@ -12,7 +12,7 @@ The dataset spans from 1960 to 2017 and focuses on understanding:
 
 ---
 
-## 📁 Dataset
+##  Dataset
 - Source: The Global Economy  
 - Observations: 58 years (1960–2017)  
 - Variables used:
@@ -21,7 +21,7 @@ The dataset spans from 1960 to 2017 and focuses on understanding:
 
 ---
 
-## 🔍 Methods
+##  Methods
 
 ### 1. Exploratory Data Analysis (EDA)
 - Histograms and boxplots  
@@ -53,7 +53,7 @@ The dataset spans from 1960 to 2017 and focuses on understanding:
 
 ---
 
-## 📈 Results
+##  Results
 
 ### GDP
 - Shows steady upward growth  
@@ -67,13 +67,13 @@ The dataset spans from 1960 to 2017 and focuses on understanding:
 
 ---
 
-## 🔮 Forecasting
+## Forecasting
 - ARIMA models used for 10-year forecasts  
 - Confidence intervals widen over time (expected in time series models)
 
 ---
 
-## 🧠 Key Insights
+## Key Insights
 - GDP requires log transformation for stability  
 - Imports are already stable in variance  
 - Economic relationship is lagged (not immediate)  
@@ -81,7 +81,7 @@ The dataset spans from 1960 to 2017 and focuses on understanding:
 
 ---
 
-## 🛠️ Tools & Libraries
+##  Tools & Libraries
 - R  
 - forecast  
 - astsa  
@@ -91,19 +91,19 @@ The dataset spans from 1960 to 2017 and focuses on understanding:
 
 ---
 
-## 📎 Files
+##  Files
 - `time-series-gdp-imports-analysis.pdf` → Full report  
 - (Optional) R script / dataset if included  
 
 ---
 
-## 👩‍💻 Author
+##  Author
 Yajiao Liu  
 UC Davis  
 
 ---
 
-## ⭐ Notes
+##  Notes
 This project demonstrates skills in:
 - Time series analysis  
 - ARIMA modeling  
