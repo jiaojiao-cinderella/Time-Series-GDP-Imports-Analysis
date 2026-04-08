@@ -1,0 +1,708 @@
+---
+title: "Final Project"
+author: "Yajiao Liu"
+date: "2025-06-06"
+output:
+  pdf_document:
+    latex_engine: xelatex
+fontsize: 12pt
+mainfont: "Times New Roman"
+linestretch: 1
+geometry: "top=0.35in, bottom=1in, left=1in, right=1in"
+---
+
+# 1 Introduction
+
+
+The Central African Republic (CAR) is a sparsely populated, landlocked country at the heart of the African continent.Despite being endowed with abundant natural resources (470 mining sites, with oil, gold, and diamonds as the primary resources), it remains one of the poorest and most fragile countries in the world.It exports natural resources (gold, diamonds, timber but must import almost everything else, especially manufactured goods and fuel.In 2023,the  total estimate GDP 3.03billion USD, and its imports accounts for 14.44% and the imports 29.04% \url{https://www.theglobaleconomy.com/}
+
+In this report ,we will incorporate various statistical methods to analysis the Central African Republic Exports time series data from 1960 to 2017.This data set contains 58 observations and 9 variables. However,we are only interested the Import and GDP variables. Analyzing these two variables, we can see the relationship between GDP and Imports,and how the data can make a predict for the future economy of The Central African Republic.
+
+
+# 2 Load Data
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+```{r}
+library(astsa)      # sarima(), sarima.for()
+library(forecast)   # Arima(), auto.arima(), forecast()
+library(MASS)       # boxcox()
+library(tseries)    # adf.test()
+library(ggplot2)
+library(gridExtra)
+```
+
+
+
+```{r,include=FALSE}
+load("D:/UC Davis/Course/STA137/finalproject.Rdata")
+sapply(finalPro_data,class)
+```
+Before we do the further process,we want to to get the basic information about the two time series and the overview of the data.We do some statistical analysis,the results are displayed in the Appendix. From the picture of histogram and box plot,we can see that there is no missing value and outliers in GDP and Imports.The value distribution is nearly normal.Therefore, we can make  the further study.
+
+
+```{r}
+data_CAR <- finalPro_data[, c("Year", "GDP", "Imports")]
+data_CAR <- data_CAR[order(data_CAR$Year), ]
+Year    <- as.integer(data_CAR$Year)
+GDP     <- data_CAR$GDP        # current USD
+Imports <- data_CAR$Imports    # % of GDP
+n       <- nrow(data_CAR)      # 58 observations
+```
+
+
+```{r,include=FALSE}
+cat("=== DATA OVERVIEW ===\n")
+cat("n =", n, "observations, 1960-2017\n")
+cat("Missing values:", sum(is.na(data_CAR)), "\n\n")
+print(summary(data_CAR[, c("GDP","Imports")]))
+```
+
+
+# 3 Exploratory Data Analysis (EDA)
+
+
+```{r,include=TRUE}
+
+# ── Figure 1: Histograms
+par(mfrow = c(1, 2))
+ 
+hist(GDP,
+     breaks = 10,
+     col    = "steelblue",
+     border = "white",
+     main   = "Figure 1a: Histogram of GDP",
+     xlab   = "GDP (current USD)",
+     ylab   = "Frequency")
+ 
+hist(Imports,
+     breaks = 10,
+     col    = "darkorange",
+     border = "white",
+     main   = "Figure 1b: Histogram of Imports",
+     xlab   = "Imports (% of GDP)",
+     ylab   = "Frequency")
+```
+```{r,include=TRUE}
+# Figure 2: Box plots
+par(mfrow = c(1, 2))
+ 
+boxplot(GDP,
+        col  = "steelblue",
+        main = "Figure 2a: Box Plot of GDP",
+        ylab = "GDP (current USD)")
+ 
+boxplot(Imports,
+        col  = "darkorange",
+        main = "Figure 2b: Box Plot of Imports",
+        ylab = "Imports (% of GDP)")
+```
+
+
+```{r,fig.pos="H"}
+# ── Figure 3: Time series plots
+par(mfrow = c(1, 2))
+ 
+plot(Year, GDP,
+     type = "o", pch = 16, cex = 0.7, col = "steelblue",
+     main = "Figure 3a: CAR GDP (1960–2017)",
+     xlab = "Year",
+     ylab = "GDP (current USD)")
+ 
+plot(Year, Imports,
+     type = "o", pch = 16, cex = 0.7, col = "darkorange",
+     main = "Figure 3b: CAR Imports (1960–2017)",
+     xlab = "Year",
+     ylab = "Imports (% of GDP)")
+```
+As we want to analysis the the time series of GDP and Imports.We also draw the time series plot. From the picture of Figure.3a,we we can see that there is a trend as the time changes, from 1960 to 2017. The GDP is increasing even though there is some drops, the whole trend is increasing, so the data of GDP is non-stationary.
+
+From the Figure.3b,Imports plot appears to be decreasing over years before 2000,after 2000,there is a trend of increasing. This may also imply that this time series is non-stationary.
+
+To verify this ,we plot the ACF and PACF(provided in the Appendix).The ACF of GDP and Imports show an exponential decay which confirms that both time series are not stationary.Both PACFs show a dominant spike at lag 1 -> unit root
+
+
+```{r,include=FALSE}
+# ── Figure 4: ACF and PACF of raw series ─────────────────────
+par(mfrow = c(2, 2))
+acf(GDP,  lag.max=20,
+    main="Figure 4a: ACF of GDP",
+    xlab="Lag (years)", ylab="ACF")
+pacf(GDP, lag.max=20,
+     main="Figure 4b: PACF of GDP",
+     xlab="Lag (years)", ylab="Partial ACF")
+acf(Imports,  lag.max=20,
+    main="Figure 4c: ACF of Imports",
+    xlab="Lag (years)", ylab="ACF")
+pacf(Imports, lag.max=20,
+     main="Figure 4d: PACF of Imports",
+     xlab="Lag (years)", ylab="Partial ACF")
+```
+
+# 4 Transformation
+
+## 4.1 Variance
+From Figure 3a,we noticed the GDP fluctuations grow over time. We now measure this formally before deciding anything.We split the series into two halves and compare variances.If variance in the 2nd half is much larger than the 1st half, the series is heteroscedastic and needs a variance-stabilizing transformation BEFORE differencing.
+```{r,include=FALSE}
+half <- n %/% 2    # split point = observation 29 (year 1988)
+```
+
+```{r,include=FALSE}
+# For GDP
+var_GDP_1st <- var(GDP[1:half])
+var_GDP_2nd <- var(GDP[(half+1):n])
+ratio_GDP   <- var_GDP_2nd / var_GDP_1st
+ 
+cat(sprintf("GDP variance - 1st half: %.3e\n", var_GDP_1st))
+cat(sprintf("GDP variance - 2nd half: %.3e\n", var_GDP_2nd))
+cat(sprintf("Ratio (2nd/1st):         %.3f\n", ratio_GDP))
+cat("--> Variance in 2nd half is", round(ratio_GDP,1), "x larger\n")
+cat("--> GDP IS heteroscedastic -> transformation NEEDED\n\n")
+```
+The ratio result of two half variance GDP shows that the GDP is mild heteroscedastic,we need need to transformation ,we need further study.However,we know that the ratio of two half variance GDP shows that the GDP is not heteroscedastic,so we will use the raw data of Import.
+
+```{r,include=FALSE}
+# For Imports
+var_IMP_1st <- var(Imports[1:half])
+var_IMP_2nd <- var(Imports[(half+1):n])
+ratio_IMP   <- var_IMP_2nd / var_IMP_1st
+ 
+cat(sprintf("Imports variance - 1st half: %.4f\n", var_IMP_1st))
+cat(sprintf("Imports variance - 2nd half: %.4f\n", var_IMP_2nd))
+cat(sprintf("Ratio (2nd/1st):             %.4f\n", ratio_IMP))
+cat("--> Variance in 2nd half is", round(ratio_IMP,2), "x (close to 1.0)\n")
+cat("--> Imports IS NOT heteroscedastic -> transformation NOT needed\n")
+```
+Now we know GDP may need a transformation.But WHICH transformation: Log,Square root, Something else? The Box-Cox test finds the optimal power lambda:lambda = 1(no transformation) (raw data is fine),lambda =0(log transformation),lambda = 0.5(square root).
+
+```{r}
+
+par(mfrow = c(1, 2))
+ 
+bc_GDP <- boxcox(GDP ~ Year, data=data_CAR, lambda=seq(-2, 2, 0.1))
+title(main = "Figure 5a: Box-Cox Profile for GDP\n(peak shows optimal lambda)",
+      xlab = expression(lambda),
+      ylab = "Log-Likelihood")
+lambda_GDP <- bc_GDP$x[which.max(bc_GDP$y)]
+ 
+bc_IMP <- boxcox(Imports ~ Year, data=data_CAR, lambda=seq(-2, 2, 0.1))
+title(main = "Figure 5b: Box-Cox Profile for Imports\n(peak shows optimal lambda)",
+      xlab = expression(lambda),
+      ylab = "Log-Likelihood")
+lambda_IMP <- bc_IMP$x[which.max(bc_IMP$y)]
+
+```
+Box-Cox optimal lambda for GDP is 0.5051,and the 95% CI for lambda INCLUDES 0 (log),which means that both log and square root are statistically valid,We choose LOG because:
+diff(log(GDP_t)) = log(GDP_t / GDP_{t-1})= approximately annual growth rate.This has a direct economic meaning.Square root has no such interpretation.
+
+Box-Cox optimal lambda for Imports: 0.5455,but notice the 95% CI is WIDE and includes 1.0 (no transformation).Combined with variance result (ratio=0.80, stable variance),there is NO statistical evidence that Imports needs a variance-stabilizing transformation. So we use Imports on original scale.
+
+## 4.2 Verify Log Stabilize GDP Variance
+
+We claimed log(GDP) will fix the heteroscedasticity.We must VERIFY this.So we use the log GDP and do the same way as before for the variance to see the result ,the result shows that the ratio is 0.1334.It is much improved compared with the original ratio 1.4,which verify that the log function really improve the result.Log(GDP) is now HOMOSCEDASTIC (variance stable)
+
+```{r}
+log_GDP <- log(GDP)
+ 
+var_logGDP_1st <- var(log_GDP[1:half])
+var_logGDP_2nd <- var(log_GDP[(half+1):n])
+ratio_logGDP   <- var_logGDP_2nd / var_logGDP_1st
+```
+
+To verify this ,we also use the differenced series ,which is the most critical check.After differencing: the result show that diff(GDP) ratio (2nd/1st): 7.050, it means that variance explodes! However ,diff(log(GDP)) ratio (2nd/1st): 1.795,which is  much more stable.
+
+Therefore we can make the Conclusion: diff(log(GDP)) has much more stable variance than diff(GDP). This is the critical check that confirms we should use log(GDP) before differencing.The plot Figure 6 ,Figure 7 also shows the same result.
+```{r,include=FALSE}
+# Also verify on the differenced series — the most critical check
+diff_GDP    <- diff(GDP)
+diff_logGDP <- diff(log_GDP)
+diff_IMP    <- diff(Imports)
+ 
+var_dGDP_1st  <- var(diff_GDP[1:(half-1)])
+var_dGDP_2nd  <- var(diff_GDP[half:length(diff_GDP)])
+var_dlGDP_1st <- var(diff_logGDP[1:(half-1)])
+var_dlGDP_2nd <- var(diff_logGDP[half:length(diff_logGDP)])
+```
+
+```{r,include=FALSE}
+cat("After differencing:\n")
+cat(sprintf("  diff(GDP)     ratio (2nd/1st): %.3f  <- variance explodes!\n",
+            var_dGDP_2nd/var_dGDP_1st))
+cat(sprintf("  diff(log(GDP)) ratio (2nd/1st): %.3f  <- much more stable \n",
+            var_dlGDP_2nd/var_dlGDP_1st))
+cat("\nConclusion: diff(log(GDP)) has much more stable variance\n")
+cat("than diff(GDP). This is the critical check that confirms\n")
+cat("we should use log(GDP) before differencing.\n")
+```
+
+```{r}
+# This figure IS the proof — show both raw and log on same scale
+par(mfrow = c(2, 2))
+ 
+plot(Year, GDP,
+     type="o", pch=16, cex=0.6, col="steelblue",
+     main="Figure 6a: Raw GDP\n[fluctuations grow over time → heteroscedastic]",
+     xlab="Year", ylab="GDP (current USD)")
+# Draw a cone to show growing variance
+abline(v=Year[half], col="red", lty=2, lwd=1.5)
+legend("topleft", bty="n", lty=2, col="red",
+       legend=paste("Split at", Year[half]))
+ 
+plot(Year, log_GDP,
+     type="o", pch=16, cex=0.6, col="steelblue",
+     main="Figure 6b: log(GDP)\n[fluctuations now stable → homoscedastic ✓]",
+     xlab="Year", ylab="log(GDP)")
+abline(v=Year[half], col="red", lty=2, lwd=1.5)
+legend("topleft", bty="n", lty=2, col="red",
+       legend=paste("Split at", Year[half]))
+ 
+plot(Year, Imports,
+     type="o", pch=16, cex=0.6, col="darkorange",
+     main="Figure 6c: Raw Imports\n[fluctuations already stable → no transformation needed]",
+     xlab="Year", ylab="Imports (% of GDP)")
+abline(v=Year[half], col="red", lty=2, lwd=1.5)
+legend("topright", bty="n", lty=2, col="red",
+       legend=paste("Split at", Year[half]))
+ 
+plot(Year, log(Imports),
+     type="o", pch=16, cex=0.6, col="darkorange",
+     main="Figure 6d: log(Imports)\n[no improvement — same pattern as raw ✓]",
+     xlab="Year", ylab="log(Imports)")
+abline(v=Year[half], col="red", lty=2, lwd=1.5)
+legend("topright", bty="n", lty=2, col="red",
+       legend=paste("Split at", Year[half]))
+```
+```{r}
+# ── Figure 7: After differencing — the decisive proof ────────
+par(mfrow = c(2, 2))
+ 
+Year_diff <- Year[-1]
+ 
+plot(Year_diff, diff_GDP,
+     type="o", pch=16, cex=0.6, col="steelblue",
+     main="Figure 7a: diff(GDP)\n[spread still grows in later years]",
+     xlab="Year", ylab="diff(GDP) (current USD)")
+abline(h=0, lty=2, col="gray50")
+ 
+plot(Year_diff, diff_logGDP,
+     type="o", pch=16, cex=0.6, col="steelblue",
+     main="Figure 7b: diff(log(GDP))\n[spread is now consistent → USE THIS ✓]",
+     xlab="Year", ylab="diff(log(GDP))")
+abline(h=0, lty=2, col="gray50")
+ 
+plot(Year_diff, diff_IMP,
+     type="o", pch=16, cex=0.6, col="darkorange",
+     main="Figure 7c: diff(Imports)\n[spread consistent → USE THIS ✓]",
+     xlab="Year", ylab="diff(Imports) (% of GDP)")
+abline(h=0, lty=2, col="gray50")
+ 
+plot(Year_diff, diff(log(Imports)),
+     type="o", pch=16, cex=0.6, col="darkorange",
+     main="Figure 7d: diff(log(Imports))\n[no improvement over Figure 7c]",
+     xlab="Year", ylab="diff(log(Imports))")
+abline(h=0, lty=2, col="gray50")
+ 
+```
+
+```{r}
+library(knitr)
+library(kableExtra)
+library(knitr)
+
+# Build the data frame
+transformation_table <- data.frame(
+  Series   = c("GDP", "Imports"),
+  `Var Ratio (Raw)`  = c(sprintf("%.2fx (unstable)", ratio_GDP),
+                          sprintf("%.2fx (stable)",   ratio_IMP)),
+  `Var Ratio (Log)`  = c(sprintf("%.2fx (stable)",  ratio_logGDP),
+                          sprintf("%.2fx (worse)",   var(log(Imports)[(half+1):n]) /
+                                                     var(log(Imports)[1:half]))),
+  Decision = c("USE LOG", "NO LOG"),
+  check.names = FALSE
+)
+
+
+kable(transformation_table,
+      caption = "Transformation Decision Summary",
+      align   = c("l", "c", "c", "c"),
+      booktabs = TRUE) |>
+  kable_styling(latex_options = c("striped", "hold_position")) |>
+  column_spec(4, bold = TRUE,
+              color = ifelse(transformation_table$Decision == "USE LOG", "blue", "black"))
+```
+## 4.3 Differencing
+We need the further stationary test to check the status.We made the hypothesis that H0: unit root (non-stationary). Reject H0 if p < 0.05.The result is like this:
+```{r,Include=TRUE}
+
+adf_table <- data.frame(
+  Series          = c("GDP", "log(GDP)", "Imports", "diff(log(GDP))", "diff(Imports)"),
+  `ADF Statistic` = c(-3.1953, -1.9149, -1.3131, -3.3099, -4.7438),
+  `P-Value`       = c(0.0969,  0.6090,  0.8520,  0.0790,  0.0100),
+  Result          = c("Non-stationary", "Non-stationary", "Non-stationary",
+                      "Borderline Non-stationary", "Stationary"),  # <-- changed here
+  check.names = FALSE
+)
+
+kable(adf_table,
+      caption  = "ADF Unit Root Test Results",
+      align    = c("l", "c", "c", "c"),
+      booktabs = TRUE,
+      digits   = 4) |>
+  kable_styling(latex_options = c("striped", "hold_position")) |>
+  column_spec(4,
+              bold  = TRUE,
+              color = ifelse(adf_table$Result == "Stationary", "blue",
+                      ifelse(adf_table$Result == "Borderline Non-stationary", "orange",
+                             "black")))  # <-- added orange for borderline
+```
+```{r}
+conclusion_table <- data.frame(
+  Series          = c("log(GDP)", "Imports", "diff(log(GDP))", "diff(Imports)"),
+  Status          = c("Non-stationary", "Non-stationary", "Stationary", "Stationary"),
+  `Differencing`  = c("Needs d=1", "Needs d=1", "Stationary at d=1", "Stationary at d=1"),
+  check.names = FALSE
+)
+
+kable(conclusion_table,
+      caption  = "Stationarity Conclusion \\& Differencing Decision",
+      align    = c("l", "c", "c"),
+      booktabs = TRUE) |>
+  kable_styling(latex_options = c("striped", "hold_position")) |>
+  column_spec(2,
+              bold  = TRUE,
+              color = ifelse(conclusion_table$Status == "Stationary", "blue", "black"))
+```
+
+
+The ADF test results indicate that both GDP and Imports are non-stationary in their original forms. The log transformation of GDP does not achieve stationary, as the ADF test still yields a large p-value.
+
+After first-order differencing:
+
+- diff(log(GDP)) has a p-value of 0.079, which is slightly above the 5% significance level. 
+  This suggests borderline non-stationarity. However, since the p-value is close to 0.05, 
+  and the ACF and PACF show no significant autocorrelation, diff(log(GDP)) is treated as stationary.
+
+- diff(Imports) has a p-value of 0.010, which is below 0.05, indicating that the series is stationary.
+
+Therefore:
+- GDP requires log transformation followed by first-order differencing (d = 1).
+- Imports requires first-order differencing (d = 1).
+
+Both transformed series are considered stationary and suitable for ARIMA modeling.
+
+
+```{r}
+# ── Figure 8: ACF and PACF after transformation + differencing
+par(mfrow = c(2, 2))
+acf(diff_logGDP, lag.max=20,
+    main="Figure 8a: ACF of diff(log(GDP))\n[no significant spikes -> ARIMA(0,1,0) candidate]",
+    xlab="Lag (years)", ylab="ACF")
+pacf(diff_logGDP, lag.max=20,
+     main="Figure 8b: PACF of diff(log(GDP))\n[no significant spikes -> ARIMA(0,1,0) candidate]",
+     xlab="Lag (years)", ylab="Partial ACF")
+acf(diff_IMP, lag.max=20,
+    main="Figure 8c: ACF of diff(Imports)\n[spikes at lags 1-2 -> MA(2) candidate]",
+    xlab="Lag (years)", ylab="ACF")
+pacf(diff_IMP, lag.max=20,
+     main="Figure 8d: PACF of diff(Imports)\n[spikes at lags 1-2 -> AR(2) candidate]",
+     xlab="Lag (years)", ylab="Partial ACF")
+ 
+```
+
+
+
+# 5 Cross-Correlation Function (CCF) 
+
+
+In order to see the relationship between diff(log(GDP)) and diff(Imports) ,we use the CCF to check the cross correlation ship 
+```{r,include=FALSE}
+cat("\n=== CROSS-CORRELATION ANALYSIS ===\n")
+cat("Series used: diff(log(GDP)) and diff(Imports)\n")
+cat("Both are stationary. Positive lag k = GDP leads Imports.\n\n")
+```
+```{r}
+ccf_obj <- ccf(diff_logGDP, diff_IMP,
+               lag.max=15,
+               main="Figure 9a: CCF - diff(log(GDP)) vs diff(Imports)\n(+lag = GDP leads Imports; dashed = 95% CI)",
+               xlab="Lag k (years)",
+               ylab="Cross-Correlation")
+ 
+cor_res <- cor.test(diff_logGDP, diff_IMP)
+plot(diff_logGDP, diff_IMP,
+     pch=16, cex=0.9, col="steelblue",
+     main="Figure 9b: Scatter - diff(log(GDP)) vs diff(Imports)\n(lag = 0, contemporaneous)",
+     xlab="diff(log(GDP))", ylab="diff(Imports) (% of GDP)")
+abline(lm(diff_IMP ~ diff_logGDP), col="red", lwd=2)
+legend("topright", bty="n",
+       legend=sprintf("r = %.3f,  p = %.3f",
+                      cor_res$estimate, cor_res$p.value))
+ 
+```
+```{r,include=FALSE}
+nd       <- length(diff_logGDP)
+ci_bound <- 1.96 / sqrt(nd)
+cat(sprintf("95%% CI = +/- %.4f  (n = %d)\n\n", ci_bound, nd))
+ 
+ccf_lags <- as.integer(ccf_obj$lag)
+ccf_vals <- as.numeric(ccf_obj$acf)
+cat("Significant lags (|r| > CI):\n")
+for (i in seq_along(ccf_lags)) {
+  if (abs(ccf_vals[i]) > ci_bound)
+    cat(sprintf("  Lag %+3d:  r = %+.4f  ***\n", ccf_lags[i], ccf_vals[i]))
+}
+cat(sprintf("\nLag 0 (contemporaneous): r = %.4f, p = %.4f -> %s\n",
+            cor_res$estimate, cor_res$p.value,
+            ifelse(cor_res$p.value<0.05, "SIGNIFICANT","NOT significant")))
+ 
+```
+The cross-correlation function (CCF) between diff(log(GDP)) and diff(Imports) reveals several significant lag relationships.
+
+At lag -12 (r = 0.3223), Imports lead GDP by 12 years. This indicates that higher imports in the past are associated with higher GDP growth in the present. This may reflect long-term effects of importing capital goods that enhance future productive capacity.
+
+At lag +1 (r = -0.2947), GDP leads Imports by 1 year. This suggests that higher GDP growth in the current year is associated with lower imports in the following year, possibly due to increased domestic production reducing reliance on imports.
+
+At lag 0 (r = -0.1257, p = 0.35), the relationship is not statistically significant, indicating no contemporaneous linear relationship between the two series.
+
+Overall, the relationship between GDP and Imports is lagged rather than simultaneous.
+
+# 6 Model Selection
+
+## 6.1 GDP model selection
+
+From Figure 8a-8b: ACF and PACF of diff(log(GDP)) show NO significant spikes at any lag.
+This means there is NO autocorrelation structure left to model.The natural candidate is ARIMA(0,1,0) with drift. We still test other candidates to be rigorous.
+
+```{r,include=FALSE}
+gdp_orders <- list(c(1,1,0), c(0,1,1), c(2,1,2), c(0,1,0))
+gdp_table  <- data.frame(Model=character(), AIC=numeric(),
+                          BIC=numeric(), LjungBox_p=numeric(),
+                          stringsAsFactors=FALSE)
+for (ord in gdp_orders) {
+  tryCatch({
+    m  <- arima(log_GDP, order=ord)
+    sm <- sarima(log_GDP, ord[1], ord[2], ord[3], details=FALSE)
+    lb <- Box.test(m$residuals, lag=10, type="Ljung-Box")$p.value
+    gdp_table <- rbind(gdp_table, data.frame(
+      Model      = sprintf("ARIMA(%d,%d,%d)", ord[1],ord[2],ord[3]),
+      AIC        = round(sm$ICs["AIC"],4),
+      BIC        = round(sm$ICs["BIC"],4),
+      LjungBox_p = round(lb,4)
+    ))
+  }, error=function(e) NULL)
+}
+gdp_table$Selected <- ifelse(gdp_table$AIC==min(gdp_table$AIC),"<-- BEST","")
+cat("GDP Model Comparison:\n")
+print(gdp_table, row.names=FALSE)
+ 
+```
+Several candidate ARIMA models were fitted to log(GDP) with d = 1, including ARIMA(1,1,0), ARIMA(0,1,1), ARIMA(2,1,2), and ARIMA(0,1,0).
+
+For ARIMA(1,1,0), the AR(1) coefficient is not statistically significant (p = 0.7367), indicating that the autoregressive term does not contribute meaningfully to the model. Therefore, the AR(1) term can be removed.
+
+Similarly, for ARIMA(0,1,1), the MA(1) coefficient is not significant (p = 0.7568), suggesting that the moving average term is unnecessary. This model also reduces to ARIMA(0,1,0).
+
+Although ARIMA(2,1,2) shows statistically significant coefficients, it is not preferred. The model has higher AIC and BIC values compared to simpler models, indicating worse model fit after penalizing complexity. Additionally, the AR and MA terms nearly cancel each other, suggesting overfitting. The Ljung–Box test yields a very high p-value (0.9827), indicating that residuals are already white noise without needing such a complex model.
+
+In contrast, ARIMA(0,1,0) with drift provides the best fit. The constant (drift) term is statistically significant (p = 0.0047), indicating a non-zero average growth rate. This model has the lowest AIC (-1.1949) and BIC (-1.1232) among all candidates. Furthermore, the Ljung–Box test confirms that the residuals behave like white noise, indicating that the model adequately captures the data structure.
+
+Therefore, ARIMA(0,1,0) with drift is selected as the final model for log(GDP).
+$$
+\Delta \log(\text{GDP}_t) = 0.0501 + w_t
+$$
+
+```{r}
+ 
+gdp_final <- arima(log_GDP, order = c(0,1,0))
+
+invisible(
+  capture.output(
+    suppressMessages(
+      gdp_sarima <- sarima(log_GDP, 0, 1, 0)
+    )
+  )
+)
+
+lb_gdp <- Box.test(gdp_final$residuals, lag = 10, type = "Ljung-Box")
+
+
+```
+
+
+## 6.2 Imports Model Selection
+
+From Figure 8c-8d: ACF of diff(Imports) has significant spikes at lags 1 and 2 -> suggests MA(2).PACF of diff(Imports) has significant spikes at lags 1 and 2-> suggests AR(2).
+We fit both ARIMA(0,1,2) and ARIMA(2,1,0) and compare.
+
+
+```{r,include=FALSE}
+imp_orders <- list(c(0,1,2), c(2,1,0))
+imp_table  <- data.frame(Model=character(), AIC=numeric(),
+                          BIC=numeric(), LjungBox_p=numeric(),
+                          stringsAsFactors=FALSE)
+for (ord in imp_orders) {
+  tryCatch({
+    m  <- arima(Imports, order=ord)
+    sm <- sarima(Imports, ord[1], ord[2], ord[3], details=FALSE)
+    lb <- Box.test(m$residuals, lag=10, type="Ljung-Box")$p.value
+    imp_table <- rbind(imp_table, data.frame(
+      Model      = sprintf("ARIMA(%d,%d,%d)", ord[1],ord[2],ord[3]),
+      AIC        = round(sm$ICs["AIC"],4),
+      BIC        = round(sm$ICs["BIC"],4),
+      LjungBox_p = round(lb,4)
+    ))
+  }, error=function(e) NULL)
+}
+imp_table$Selected <- ifelse(imp_table$AIC==min(imp_table$AIC),"<-- BEST","")
+cat("Imports Model Comparison:\n")
+print(imp_table, row.names=FALSE)
+```
+Two candidate models were considered for the Imports series: ARIMA(0,1,2) and ARIMA(2,1,0).
+
+For ARIMA(0,1,2), the MA(2) coefficient is statistically significant (p = 0.0019), while the MA(1) and constant terms are not significant (p > 0.05). This suggests that only the second lag of the moving average component contributes meaningfully to the model.
+
+For ARIMA(2,1,0), the AR(2) coefficient is statistically significant (p = 0.0012), whereas the AR(1) and constant terms are not significant. This indicates that the second autoregressive lag captures the main dependence structure in the series.
+
+Comparing the two models, ARIMA(2,1,0) has a slightly lower AIC (5.4540 vs 5.4586) and BIC (5.5973 vs 5.6019), indicating a better balance between model fit and complexity. In addition, both models pass the Ljung–Box test (p-values > 0.05), confirming that their residuals behave like white noise.
+
+Therefore, ARIMA(2,1,0) is selected as the final model for Imports.The model is like this :
+$$
+\Delta Z_t = -0.1733\,Z_{t-1} - 0.4105\,Z_{t-2} + w_t,\quad w_t \sim WN(0, 11.81)
+$$
+
+
+```{r}
+ 
+imp_final  <- arima(Imports, order = c(2, 1, 0))
+invisible(
+  capture.output(
+    suppressMessages(imp_sarima <- sarima(Imports, 2, 1, 0)
+)
+)
+)
+ 
+lb_imp <- Box.test(imp_final$residuals, lag = 10, type = "Ljung-Box")
+
+```
+
+
+# 7 Forecast
+
+
+```{r}
+library(forecast)   # needed for Arima() and autoplot()
+ 
+h <- 10
+ 
+# Convert to ts objects FIRST — this is the fix
+log_GDP_ts <- ts(log_GDP,  start = 1960, frequency = 1)
+Imports_ts <- ts(Imports,  start = 1960, frequency = 1)
+ 
+ 
+# ── Figure 12: GDP forecast ───────────────────────────────────
+# Option A: sarima.for() — now works because input is ts object
+par(mfrow = c(1, 1))
+gdp_fc <- sarima.for(log_GDP_ts,
+                     n.ahead = h,
+                     p = 0, d = 1, q = 0,
+                     main = paste0("Figure 12: GDP Forecast",
+                                   " - ARIMA(0,1,0) with Drift\n",
+                                   "(2018-2027; dark=80% CI, light=95% CI)"),
+                     xlab = "Year",
+                     ylab = "log(GDP)")
+ 
+
+ 
+```
+```{r}
+# Suppress all cat() output
+gdp_forecast_table <- data.frame(
+  Year        = 2018:2027,
+  `Forecast`  = sapply(1:h, function(i) exp(gdp_fc$pred[i]) / 1e9),
+  `Lower 95%` = sapply(1:h, function(i) exp(gdp_fc$pred[i] - 1.96 * gdp_fc$se[i]) / 1e9),
+  `Upper 95%` = sapply(1:h, function(i) exp(gdp_fc$pred[i] + 1.96 * gdp_fc$se[i]) / 1e9),
+  check.names = FALSE
+)
+
+kable(gdp_forecast_table,
+      caption  = "GDP Forecasts (Billion USD) - ARIMA(0,1,0) with Drift",
+      align    = c("c", "c", "c", "c"),
+      booktabs = TRUE,
+      digits   = 3) |>
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+
+The GDP forecasts for 2018–2027 are obtained from the ARIMA(0,1,0) model with drift and are presented after back-transforming from the logarithmic scale to billions of U.S. dollars.
+
+The results show a steady upward trend in GDP over the forecast horizon. The point forecasts increase from approximately 2.05 billion USD in 2018 to 3.22 billion USD in 2027, reflecting consistent economic growth over time.
+
+However, the prediction intervals widen substantially as the forecast horizon increases. The 95% confidence interval for 2018 ranges from 1.59 to 2.64 billion USD, while by 2027 it expands to 1.45 to 7.14 billion USD. This widening indicates increasing uncertainty in long-term forecasts, which is typical for ARIMA models, especially those with a random walk structure.
+
+Overall, the model suggests that GDP is expected to grow at a relatively stable average rate, but with considerable uncertainty in the long run.
+
+
+
+```{r}
+# ── Figure 13: Imports forecast ──────────────────────────────
+par(mfrow = c(1, 1))
+imp_fc <- sarima.for(Imports_ts,
+                     n.ahead = h,
+                     p = 2, d = 1, q = 0,
+                     main = paste0("Figure 13: Imports Forecast",
+                                   " - ARIMA(2,1,0)\n",
+                                   "(2018-2027; dark=\\80% CI, light=\\95% CI)"),
+                     xlab = "Year",
+                     ylab = "Imports (\\% of GDP)")
+ 
+# Build table from imp_fc directly
+imp_forecast_table <- data.frame(
+  Year        = 2018:2027,
+  `Forecast`  = imp_fc$pred,
+  `Lower 80%` = imp_fc$pred - 1.28 * imp_fc$se,
+  `Upper 80%` = imp_fc$pred + 1.28 * imp_fc$se,
+  `Lower 95%` = imp_fc$pred - 1.96 * imp_fc$se,
+  `Upper 95%` = imp_fc$pred + 1.96 * imp_fc$se,
+  check.names = FALSE
+)
+
+kable(imp_forecast_table,
+      caption  = "Imports Forecasts (\\% of GDP)",
+      align    = c("c", "c", "c", "c", "c", "c"),
+      booktabs = TRUE,
+      digits   = 2) |>
+  kable_styling(latex_options = c("striped", "hold_position")) |>
+  add_header_above(c(" " = 2, "\\80% CI" = 2, "\\95% CI" = 2))
+```
+The forecasts for Imports (% of GDP) over the period 2018–2027 are generated from the selected ARIMA(2,1,0) model.
+
+The point forecasts indicate that Imports remain relatively stable over time, fluctuating slightly around 31–33% of GDP. Unlike GDP, there is no strong upward or downward trend, suggesting that Imports as a share of GDP are expected to remain steady in the long run.
+
+However, both the 80% and 95% prediction intervals widen gradually as the forecast horizon increases. For example, the 95% interval expands from approximately 26.52–39.99 in 2018 to 17.11–46.35 in 2027. This widening reflects increasing uncertainty in future predictions, which is typical in time series forecasting.
+
+Overall, the model suggests that while the central tendency of Imports remains stable, there is considerable uncertainty in long-term forecasts, indicating potential variability in future import behavior.
+
+# 8 Conclusion
+This report analyzed the GDP and Imports (% of GDP) time series of the Central 
+African Republic from 1960 to 2017. A log transformation was applied to GDP to 
+stabilize variance, while Imports required no transformation. ADF tests confirmed 
+both series needed first-order differencing to achieve stationarity. Based on AIC, 
+BIC, and Ljung-Box diagnostics, ARIMA(0,1,0) with drift was selected for log(GDP) 
+and ARIMA(2,1,0) for Imports. GDP is forecast to grow steadily from 2.05 to 3.22 
+billion USD over 2018-2027, while Imports are expected to remain stable around 
+31-33% of GDP. CCF analysis further revealed that the two series share a lagged 
+rather than contemporaneous relationship, suggesting that import activity influences 
+GDP growth over the long run.
+
+\newpage
+
+## Appendix: R Code
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=TRUE}
+
+```
+
+
+
